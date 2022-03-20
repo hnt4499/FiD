@@ -22,6 +22,7 @@ def init_logger(is_main=True, is_distributed=False, filename=None):
     handlers = [logging.StreamHandler(sys.stdout)]
     if filename is not None:
         handlers.append(logging.FileHandler(filename=filename))
+    logging.root.handlers.clear()
     logging.basicConfig(
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO if is_main else logging.WARN,

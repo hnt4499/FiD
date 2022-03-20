@@ -4,15 +4,14 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import time
-import sys
+from pathlib import Path
+
 import torch
 import transformers
 import numpy as np
-from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler, DistributedSampler, SequentialSampler
-from src.options import Options
 
+from src.options import Options
 import src.slurm
 import src.util
 import src.evaluation
@@ -63,10 +62,17 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 scheduler.step()
                 model.zero_grad()
 
+            if step % opt.log_freq == 0:
+                logger.info(
+                    f"Training epoch: {epoch}, local step: {i}/{len(train_dataloader)}, "
+                    f"global step: {step}/{opt.total_steps}"
+                )
+
             train_loss = src.util.average_main(train_loss, opt)
             curr_loss += train_loss.item()
 
-            if step % opt.eval_freq == 0:
+            if step % opt.eval_freq == 0 or (opt.debugging and i == 10):
+                logger.info(f"Start evaluation at epoch={epoch}, local step={i}, global step={step}")
                 dev_em = evaluate(model, eval_dataset, tokenizer, collator, opt)
                 model.train()
                 if opt.is_main:
@@ -78,7 +84,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                     log += f"train: {curr_loss/opt.eval_freq:.3f} |"
                     log += f"evaluation: {100*dev_em:.2f}EM |"
                     log += f"lr: {scheduler.get_last_lr()[0]:.5f}"
-                    logger.info(log)    
+                    logger.info(log)
                     if tb_logger is not None:
                         tb_logger.add_scalar("Evaluation", dev_em, step)
                         tb_logger.add_scalar("Training", curr_loss / (opt.eval_freq), step)
@@ -89,6 +95,10 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                           opt, checkpoint_path, f"step-{step}")
             if step > opt.total_steps:
                 break
+
+            if opt.debugging and i == 9:
+                logger.info("Debugging is activated. Stopping training after 10 iterations")
+                return
 
 def evaluate(model, dataset, tokenizer, collator, opt):
     sampler = SequentialSampler(dataset)
@@ -120,6 +130,13 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                 total += 1
                 exactmatch.append(score)
 
+            if i % opt.log_freq == 0:
+                logger.info(f"Evaluation: {i}/{len(dataloader)}")
+
+            if opt.debugging and i == 9:
+                logger.info("Debugging is activated. Stopping evaluation after 10 iterations")
+                break
+
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
     return exactmatch
 
@@ -149,6 +166,10 @@ if __name__ == "__main__":
         checkpoint_path / 'run.log'
     )
 
+    # Setup debugging mode
+    if opt.debugging:
+        opt.log_freq = 1  # log every step
+
     model_name = 't5-' + opt.model_size
     model_class = src.model.FiDT5
 
@@ -158,8 +179,8 @@ if __name__ == "__main__":
 
     # use golbal rank and world size to split the eval set on multiple gpus
     train_examples = src.data.load_data(
-        opt.train_data, 
-        global_rank=opt.global_rank, 
+        opt.train_data,
+        global_rank=opt.global_rank,
         world_size=opt.world_size,
     )
     train_dataset = src.data.Dataset(train_examples, opt.n_context)
@@ -172,9 +193,12 @@ if __name__ == "__main__":
     eval_dataset = src.data.Dataset(eval_examples, opt.n_context)
 
     if not checkpoint_exists and opt.model_path == "none":
-        t5 = transformers.T5ForConditionalGeneration.from_pretrained(model_name)
-        model = src.model.FiDT5(t5.config)
-        model.load_t5(t5.state_dict())
+        model = src.model.FiDT5.init_model(
+            cfg_name=model_name,
+            num_passages=opt.n_context,
+            device="cuda",
+            gradient_checkpointing=opt.use_checkpoint,
+        )
         model = model.to(opt.local_rank)
         optimizer, scheduler = src.util.set_optim(opt, model)
         step, best_dev_em = 0, 0.0
@@ -187,8 +211,6 @@ if __name__ == "__main__":
         model, optimizer, scheduler, opt_checkpoint, step, best_dev_em = \
             src.util.load(model_class, opt.model_path, opt, reset_params=True)
         logger.info(f"Model loaded from {opt.model_path}")
-
-    model.set_checkpoint(opt.use_checkpoint)
 
     if opt.is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(
