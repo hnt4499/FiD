@@ -46,6 +46,8 @@ class Options():
         self.parser.add_argument('--no_title', action='store_true',
                         help='article titles not included in passages')
         self.parser.add_argument('--n_context', type=int, default=1)
+        self.parser.add_argument('--dpr_reader_model_path', type=str, default=None,
+                        help="pre-trained model path that was trained using `train_generative_reader.py` from DPR")
 
     def add_retriever_options(self):
         self.parser.add_argument('--train_data', type=str, default='none', help='path of train data')

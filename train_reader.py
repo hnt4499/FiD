@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 from pathlib import Path
 
 import torch
@@ -71,7 +72,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             train_loss = src.util.average_main(train_loss, opt)
             curr_loss += train_loss.item()
 
-            if step % opt.eval_freq == 0 or (opt.debugging and i == 10):
+            if step % opt.eval_freq == 0 or (opt.debugging and i == 9):
                 logger.info(f"Start evaluation at epoch={epoch}, local step={i}, global step={step}")
                 dev_em = evaluate(model, eval_dataset, tokenizer, collator, opt)
                 model.train()
@@ -211,6 +212,14 @@ if __name__ == "__main__":
         model, optimizer, scheduler, opt_checkpoint, step, best_dev_em = \
             src.util.load(model_class, opt.model_path, opt, reset_params=True)
         logger.info(f"Model loaded from {opt.model_path}")
+
+    if opt.dpr_reader_model_path:
+        logger.info(
+            f"DPR reader model path is specified. Loading from "
+            f"{os.path.abspath(opt.dpr_reader_model_path)}"
+        )
+        weights = torch.load(opt.dpr_reader_model_path, map_location="cuda")
+        model.load_state_dict(weights["model_dict"])
 
     if opt.is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(
