@@ -164,9 +164,9 @@ if __name__ == "__main__":
     #checkpoint_path, checkpoint_exists = util.get_checkpoint_path(opt)
 
     # Print and save config
-    opt_str = vars(opt)
+    opt_str = dict(vars(opt))
     if "device" in opt_str:
-        del opt_str["device"]
+        opt_str = {k:v for k, v in opt_str.items() if k != "device"}
     print(f"Config:\n{json.dumps(opt_str, indent=2)}")
     with open(checkpoint_path / "config.yaml", "w") as fout:
         yaml.dump(opt_str, fout)
