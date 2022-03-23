@@ -5,7 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import json
 from pathlib import Path
+import yaml
 
 import torch
 import transformers
@@ -160,6 +162,14 @@ if __name__ == "__main__":
     #if not checkpoint_exists and opt.is_main:
     #    options.print_options(opt)
     #checkpoint_path, checkpoint_exists = util.get_checkpoint_path(opt)
+
+    # Print and save config
+    opt_str = vars(opt)
+    if "device" in opt_str:
+        del opt_str["device"]
+    print(f"Config:\n{json.dumps(opt_str, indent=2)}")
+    with open(checkpoint_path / "config.yaml", "w") as fout:
+        yaml.dump(opt_str, fout)
 
     logger = src.util.init_logger(
         opt.is_main,
